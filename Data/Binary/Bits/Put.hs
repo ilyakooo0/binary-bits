@@ -41,11 +41,13 @@ import qualified Data.Binary.Put as Put
 import Data.Binary.Put ( Put )
 import Data.Binary.Bits.Internal
 import Data.Binary.Bits.BitOrder
+import Data.Binary.Bits.Alignment
 
 import Data.ByteString as BS
 import Data.ByteString.Unsafe as BS
 
 import Control.Applicative
+import Control.Monad (when)
 import Data.Bits
 import Data.Monoid
 import Data.Word
@@ -178,6 +180,9 @@ flushIncomplete s@(S b w o bo)
   | o == 0 = s
   | otherwise = (S (b `mappend` B.singleton w) 0 0 bo)
 
+getOffset :: BitPut Int
+getOffset = BitPut $ \s@(S _ _ o _) -> PairS o s
+
 -- | Run the 'BitPut' monad inside 'Put'.
 runBitPut :: BitPut () -> Put.Put
 runBitPut m = Put.putBuilder b
@@ -208,3 +213,15 @@ instance BitOrderable BitPut where
    setBitOrder bo = BitPut $ \(S bu b o _) -> PairS () (S bu b o bo)
 
    getBitOrder = BitPut $ \s@(S _ _ _ bo) -> PairS bo s
+
+instance Alignable BitPut where
+   -- | Skip the given number of bits
+   skipBits n
+      | n <= 64   = putWord64 n 0
+      | otherwise = putWord64 64 0 >> skipBits (n-64)
+
+   -- | Skip bits if necessary to align to the next byte
+   alignByte = do
+      o <- getOffset
+      when (o /= 0) $
+         skipBits (8-o)

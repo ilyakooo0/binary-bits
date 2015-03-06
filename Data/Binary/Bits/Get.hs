@@ -98,6 +98,7 @@ import Data.Binary.Get as B ( Get, getLazyByteString, isEmpty )
 import Data.Binary.Get.Internal as B ( get, put, ensureN )
 import Data.Binary.Bits.BitOrder
 import Data.Binary.Bits.Internal
+import Data.Binary.Bits.Alignment
 
 import Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
@@ -291,6 +292,20 @@ instance BitOrderable BitGet where
       (S _ _ bo) <- getState
       return bo
 
+instance Alignable BitGet where
+   -- | Skip the given number of bits
+   skipBits n = do
+      ensureBits n
+      withState (incS n)
+
+   -- | Skip bits if necessary to align to the next byte
+   alignByte = do
+      (S _ o _) <- getState
+      when (o /= 0) $
+         skipBits (8-o)
+
+
+
 -- | Run a 'BitGet' within the Binary packages 'Get' monad. If a byte has
 -- been partially consumed it will be discarded once 'runBitGet' is finished.
 runBitGet :: BitGet a -> Get a
@@ -337,20 +352,6 @@ ensureBits n = do
                          bs' <- B.get
                          put B.empty
                          return (S (bs`append`bs') o bo, ())
-
--- | Skip the given number of bits
-skipBits :: Int -> BitGet ()
-skipBits n = do
-   ensureBits n
-   withState (incS n)
-
--- | Skip bits if necessary to align to the next byte
-alignByte :: BitGet ()
-alignByte = do
-   (S _ o _) <- getState
-   when (o /= 0) $
-      skipBits (8-o)
-
 
 -- | Test whether all input has been consumed, i.e. there are no remaining
 -- undecoded bytes.

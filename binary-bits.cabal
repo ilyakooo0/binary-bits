@@ -25,7 +25,8 @@ library
   exposed-modules:     Data.Binary.Bits ,
                        Data.Binary.Bits.Put ,
                        Data.Binary.Bits.Get ,
-                       Data.Binary.Bits.BitOrder
+                       Data.Binary.Bits.BitOrder ,
+                       Data.Binary.Bits.Alignment
   other-modules:       Data.Binary.Bits.Internal
 
   default-language:    Haskell98
@@ -36,6 +37,7 @@ test-suite qc
   type: exitcode-stdio-1.0
   main-is: BitsQC.hs
   default-language:    Haskell98
+  --ghc-options: -O2 -Wall
 
   build-depends: base==4.*, binary >= 0.6.0.0, bytestring,
                  QuickCheck>=2, random,

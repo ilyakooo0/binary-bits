@@ -18,7 +18,6 @@ import Control.Applicative
 import Data.Bits
 import Data.Word
 import Foreign.Storable
-import System.Random
 import Data.Traversable (traverse)
 import Data.Foldable (traverse_)
 
@@ -262,8 +261,8 @@ prop_fail lbs errMsg0 = forAll (choose (0, 8 * L.length lbs)) $ \len ->
       expectedBytesConsumed
         | bits == 0 = bytes
         | otherwise = bytes + 1
-      p = do getByteString (fromIntegral bytes)
-             getBits (fromIntegral bits) :: BitGet Word8
+      p = do _ <- getByteString (fromIntegral bytes)
+             _ <- getBits (fromIntegral bits) :: BitGet Word8
              fail errMsg0
       r = runGetIncremental (runBitGet p) `pushChunks` lbs
   in case r of
@@ -395,11 +394,6 @@ instance (Arbitrary (W a), Arbitrary (W b), Arbitrary (W c)) => Arbitrary (W (a,
     arbitrary          = ((W .) .) . (,,) <$> arbitraryW <*> arbitraryW <*> arbitraryW
     shrink (W (a,b,c)) = ((W .) .) . (,,) <$> shrinkW a <*> shrinkW b <*> shrinkW c
 
-integralRandomR :: (Integral a, RandomGen g) => (a,a) -> g -> (a,g)
-integralRandomR  (a,b) g = case randomR (fromIntegral a :: Integer,
-                                         fromIntegral b :: Integer) g of
-                            (x,g) -> (fromIntegral x, g)
-
 data Primitive
   = Bool Bool
   | W8  Int Word8
@@ -408,6 +402,7 @@ data Primitive
   | W64 Int Word64
   | BS  Int B.ByteString
   | LBS Int L.ByteString
+  | Skip Int
   | IsEmpty
   deriving (Eq, Show)
 
@@ -426,6 +421,7 @@ instance Arbitrary Primitive where
       , gen W16
       , gen W32
       , gen W64
+      , Skip <$> choose (0, 3000)
       , do n <- choose (0,10)
            cs <- vector n
            return (BS n (B.pack cs))
@@ -442,6 +438,7 @@ instance Arbitrary Primitive where
       W16 _ x -> snk W16 x
       W32 _ x -> snk W32 x
       W64 _ x -> snk W64 x
+      Skip x -> Skip <$> shrink x
       BS _ bs -> let ws = B.unpack bs in map (\ws' -> BS (length ws') (B.pack ws')) (shrink ws)
       LBS _ lbs -> let ws = L.unpack lbs in map (\ws' -> LBS (length ws') (L.pack ws')) (shrink ws)
       IsEmpty -> []
@@ -478,6 +475,7 @@ putPrimitive p =
     W16 n x -> putWord16 n x
     W32 n x -> putWord32 n x
     W64 n x -> putWord64 n x
+    Skip n  -> skipBits n
     BS _ bs -> putByteString bs
     LBS _ lbs -> mapM_ putByteString (L.toChunks lbs)
     IsEmpty -> return ()
@@ -490,10 +488,22 @@ getPrimitive p =
     W16 n _ -> W16 n <$> getWord16 n
     W32 n _ -> W32 n <$> getWord32 n
     W64 n _ -> W64 n <$> getWord64 n
+    Skip n  -> skipBits n >> return (Skip n)
     BS n _ -> BS n <$> getByteString n
     LBS n _ -> LBS n <$> getLazyByteString n
     IsEmpty -> isEmpty >> return IsEmpty
 
+getPrimitiveSize :: Primitive -> Int
+getPrimitiveSize p = case p of
+    Bool _  -> 1
+    W8 n _  -> n
+    W16 n _ -> n
+    W32 n _ -> n
+    W64 n _ -> n
+    Skip n  -> n
+    BS n _  -> n*8
+    LBS n _ -> n*8
+    IsEmpty -> 0
 
 verifyProgram :: Int -> Program -> BitGet Bool
 verifyProgram totalLength ps0 = go 0 ps0
@@ -501,13 +511,6 @@ verifyProgram totalLength ps0 = go 0 ps0
     go _ [] = return True
     go pos (p:ps) =
       case p of
-        Bool x -> check x getBool >> go (pos+1) ps
-        W8 n x ->  check x (getWord8 n) >> go (pos+n) ps
-        W16 n x -> check x (getWord16 n) >> go (pos+n) ps
-        W32 n x -> check x (getWord32 n) >> go (pos+n) ps
-        W64 n x -> check x (getWord64 n) >> go (pos+n) ps
-        BS n x -> check x (getByteString n) >> go (pos+(8*n)) ps
-        LBS n x -> check x (getLazyByteString n) >> go (pos+(8*n)) ps
         IsEmpty -> do
           let expected = pos == totalLength
           actual <- isEmpty
@@ -515,6 +518,7 @@ verifyProgram totalLength ps0 = go 0 ps0
             then go pos ps
             else error $ "isEmpty returned wrong value, expected "
                           ++ show expected ++ " but got " ++ show actual
+        _ -> check p (getPrimitive p) >> go (pos + getPrimitiveSize p) ps
     check x g = do
       y <- g
       if x == y

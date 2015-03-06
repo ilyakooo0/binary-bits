@@ -82,9 +82,9 @@ putWordS n w s@(S builder b o bo) = s'
       -- Word containing the remaining (n-cn) bits to store in its LSB
       w' = case bo of
          BB -> w
-         BL -> w
+         BL -> w `fastShiftR` cn
          LB -> w `fastShiftR` cn
-         LL -> w `fastShiftR` cn
+         LL -> w
 
       -- Select bits to store in the current byte.
       -- Put them in the correct order and return them in the least-significant
@@ -92,9 +92,9 @@ putWordS n w s@(S builder b o bo) = s'
       selectBits :: (Num a, FastBits a, Integral a) => a -> Word8
       selectBits x = fromIntegral $ case bo of
          BB ->                  mask cn $ x `fastShiftR` (n-cn)
-         BL -> reverseBits cn $ mask cn $ x `fastShiftR` (n-cn)
+         LL -> reverseBits cn $ mask cn $ x `fastShiftR` (n-cn)
          LB ->                  mask cn x
-         LL -> reverseBits cn $ mask cn x
+         BL -> reverseBits cn $ mask cn x
 
       -- shift left at the correct position
       shl :: Word8 -> Word8
@@ -148,20 +148,19 @@ putByteString :: ByteString -> BitPut ()
 putByteString bs = BitPut $ \s -> PairS () (putByteStringS bs s)
 
 putByteStringS :: ByteString -> S -> S
-putByteStringS bs (S builder b 0 BB) = S (builder `mappend` B.fromByteString bs) b 0 BB
-putByteStringS bs s@(S _ _ _ BB)
+putByteStringS bs s
    | BS.null bs = s
-   | otherwise  = putByteStringS (BS.unsafeTail bs) (putWordS 8 (BS.unsafeHead bs) s)
-putByteStringS bs (S builder b o bo) = putByteStringS bs' (S builder b o BB)
+   | otherwise  = case s of
+      (S builder b 0 BB) -> S (builder `mappend` B.fromByteString bs) b 0 BB
+      (S builder b 0 LB) -> S (builder `mappend` B.fromByteString (BS.reverse bs)) b 0 LB
+      (S builder b 0 LL) -> S (builder `mappend` B.fromByteString (rev bs)) b 0 LL
+      (S builder b 0 BL) -> S (builder `mappend` B.fromByteString (rev (BS.reverse bs))) b 0 BL
+      (S _ _ _ BB)       -> putByteStringS (BS.unsafeTail bs) (putWordS 8 (BS.unsafeHead bs) s)
+      (S _ _ _ LB)       -> putByteStringS (BS.unsafeInit bs) (putWordS 8 (BS.unsafeLast bs) s)
+      (S _ _ _ BL)       -> putByteStringS (BS.unsafeInit bs) (putWordS 8 (BS.unsafeLast bs) s)
+      (S _ _ _ LL)       -> putByteStringS (BS.unsafeTail bs) (putWordS 8 (BS.unsafeHead bs) s)
    where
-      rev = BS.map (reverseBits 8)
-
-      bs' = case bo of
-         BL -> BS.reverse (rev bs)
-         LB -> BS.reverse bs
-         LL -> rev bs
-         BB -> bs -- should not occur, already matched but the compiler doesn't detect it
-
+      rev    = BS.map (reverseBits 8)
 
 
 -- | Run a 'Put' inside 'BitPut'. Any partially written bytes will be flushed

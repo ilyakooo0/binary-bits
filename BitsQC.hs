@@ -9,6 +9,7 @@ import Data.Binary.Put ( runPut )
 import Data.Binary.Bits
 import Data.Binary.Bits.Get
 import Data.Binary.Bits.Put
+import Data.Binary.Bits.BitOrder
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
@@ -18,6 +19,8 @@ import Data.Bits
 import Data.Word
 import Foreign.Storable
 import System.Random
+import Data.Traversable (traverse)
+import Data.Foldable (traverse_)
 
 import Test.Framework.Providers.QuickCheck2 ( testProperty )
 import Test.Framework.Runners.Console ( defaultMain )
@@ -36,7 +39,10 @@ tests =
       [ testProperty "prop_composite_case" prop_composite_case ]
 
   , testGroup "getByteString"
-      [ testProperty "prop_getByteString_negative" prop_getByteString_negative ]
+      [ testProperty "prop_getByteString_negative" prop_getByteString_negative 
+      , testProperty "prop_putByteString_getByteString" (prop_putByteString_getByteString :: BitOrder -> B.ByteString -> Property)
+      , testProperty "prop_putByteString_getByteString_many" (prop_putByteString_getByteString_many :: BitOrder -> [B.ByteString] -> Property)
+      ]
 
   , testGroup "getLazyByteString"
       [ testProperty "getLazyByteString == getByteString"
@@ -84,10 +90,10 @@ tests =
       ]
 
   , testGroup "prop_put_with_bitreq"
-      [ testProperty "Word8"  (prop_putget_with_bitreq :: W Word8  -> Property)
-      , testProperty "Word16" (prop_putget_with_bitreq :: W Word16 -> Property)
-      , testProperty "Word32" (prop_putget_with_bitreq :: W Word32 -> Property)
-      , testProperty "Word64" (prop_putget_with_bitreq :: W Word64 -> Property)
+      [ testProperty "Word8"  (prop_putget_with_bitreq :: BitOrder -> W Word8  -> Property)
+      , testProperty "Word16" (prop_putget_with_bitreq :: BitOrder -> W Word16 -> Property)
+      , testProperty "Word32" (prop_putget_with_bitreq :: BitOrder -> W Word32 -> Property)
+      , testProperty "Word64" (prop_putget_with_bitreq :: BitOrder -> W Word64 -> Property)
       ]
 
   , testGroup "prop_putget_list_simple"
@@ -112,10 +118,10 @@ tests =
       , testProperty "Word64" (prop_putget_list_with_bitreq :: W [Word64] -> Property)
       ]
   , testGroup "prop_bitget_bytestring_interspersed"
-      [ testProperty "Word8"  (prop_bitget_bytestring_interspersed :: W Word8  -> [B.ByteString] -> Property)
-      , testProperty "Word16" (prop_bitget_bytestring_interspersed :: W Word16 -> [B.ByteString] -> Property)
-      , testProperty "Word32" (prop_bitget_bytestring_interspersed :: W Word32 -> [B.ByteString] -> Property)
-      , testProperty "Word64" (prop_bitget_bytestring_interspersed :: W Word64 -> [B.ByteString] -> Property)
+      [ testProperty "Word8"  (prop_bitget_bytestring_interspersed :: BitOrder -> W Word8  -> [B.ByteString] -> Property)
+      , testProperty "Word16" (prop_bitget_bytestring_interspersed :: BitOrder -> W Word16 -> [B.ByteString] -> Property)
+      , testProperty "Word32" (prop_bitget_bytestring_interspersed :: BitOrder -> W Word32 -> [B.ByteString] -> Property)
+      , testProperty "Word64" (prop_bitget_bytestring_interspersed :: BitOrder -> W Word64 -> [B.ByteString] -> Property)
       ]
   , testGroup "Simulate programs"
       [ testProperty "primitive" prop_primitive
@@ -158,13 +164,28 @@ prop_getByteString_negative n =
   n < 1 ==>
     runGet (runBitGet (getByteString n)) L.empty == B.empty
 
-prop_putget_with_bitreq :: (BinaryBit a, Num a, Bits a, Ord a) => W a -> Property
-prop_putget_with_bitreq (W w) = property $
+prop_putByteString_getByteString :: BitOrder -> B.ByteString -> Property
+prop_putByteString_getByteString bo bs = property $ bs' == bs
+   where
+      n   = B.length bs
+      w   = runPut (runBitPut (withBitOrder bo (putByteString bs)))
+      bs' = runGet (runBitGet (withBitOrder bo (getByteString n))) w
+
+prop_putByteString_getByteString_many :: BitOrder -> [B.ByteString] -> Property
+prop_putByteString_getByteString_many bo bs = property $ bs' == bs
+   where
+      n   = fmap B.length bs
+      w   = runPut (runBitPut (withBitOrder bo (traverse_ putByteString bs)))
+      bs' = runGet (runBitGet (withBitOrder bo (traverse getByteString n))) w
+
+
+prop_putget_with_bitreq :: (BinaryBit a, Num a, Bits a, Ord a) => BitOrder -> W a -> Property
+prop_putget_with_bitreq bo (W w) = property $
   -- write all words with as many bits as it's required
   let p = putBits (bitreq w) w
       g = getBits (bitreq w)
-      lbs = runPut (runBitPut p)
-      w' = runGet (runBitGet g) lbs
+      lbs = runPut (runBitPut (withBitOrder bo p))
+      w' = runGet (runBitGet (withBitOrder bo g)) lbs
   in w == w'
 
 -- | Write a list of items. Each item is written with the maximum amount of
@@ -226,12 +247,12 @@ prop_bitget_with_put_from_binary (W ws) = property $
   in ws == ws'
 
 -- | Write each 'ByteString' with a variable sized value as a separator.
-prop_bitget_bytestring_interspersed :: (BinaryBit a, Binary a, Num a, Ord a, Bits a) => W a -> [B.ByteString] -> Property
-prop_bitget_bytestring_interspersed (W ws) bss = property $
+prop_bitget_bytestring_interspersed :: (BinaryBit a, Binary a, Num a, Ord a, Bits a) => BitOrder -> W a -> [B.ByteString] -> Property
+prop_bitget_bytestring_interspersed bo (W ws) bss = property $
   let p = mapM_ (\bs -> putBits (bitreq ws) ws >> putByteString bs) bss
       g = mapM (\bs -> (,) <$> getBits (bitreq ws) <*> getByteString (B.length bs)) bss
-      lbs = runPut (runBitPut p)
-      r = runGet (runBitGet g) lbs
+      lbs = runPut (runBitPut (withBitOrder bo p))
+      r = runGet (runBitGet (withBitOrder bo g)) lbs
   in map (ws,) bss == r
 
 -- | Test failing.
@@ -424,6 +445,14 @@ instance Arbitrary Primitive where
       BS _ bs -> let ws = B.unpack bs in map (\ws' -> BS (length ws') (B.pack ws')) (shrink ws)
       LBS _ lbs -> let ws = L.unpack lbs in map (\ws' -> LBS (length ws') (L.pack ws')) (shrink ws)
       IsEmpty -> []
+
+instance Arbitrary BitOrder where
+   arbitrary = elements [BB, LB, LL, BL]
+   shrink LL  = [BB,LB,BL]
+   shrink BL  = [BB,LB]
+   shrink LB  = [BB]
+   shrink BB  = []
+
 
 prop_primitive :: Primitive -> Property
 prop_primitive prim = property $

@@ -239,16 +239,17 @@ readWordChecked m n s
 readByteString :: Int -> S -> ByteString
 readByteString n (S bs o bo) =
    let 
-      bs' = unsafeTake (n+1) bs
-      rev = B.map (reverseBits 8)
+      bs'  = unsafeTake (n+1) bs
+      bs'' = unsafeTake n bs
+      rev  = B.map (reverseBits 8)
    in case (o,bo) of
-      (0,BB) -> unsafeTake n bs
-      (0,LB) -> B.reverse (unsafeTake n bs)
-      (0,BL) -> rev (unsafeTake n bs)
-      (0,LL) -> rev (B.reverse (unsafeTake n bs))
-      (_,BL) -> rev (readByteString n (S (B.reverse bs') o LB))
-      (_,LL) -> rev (readByteString n (S (B.reverse bs') o BB))
-      (_,LB) -> readByteString n (S (B.reverse bs') o BB)
+      (0,BB) -> bs''
+      (0,LB) -> B.reverse bs''
+      (0,LL) -> rev bs''
+      (0,BL) -> rev . B.reverse $ bs''
+      (_,LB) -> readByteString n (S (B.reverse bs') (8-o) BB)
+      (_,BL) -> rev . B.reverse $ readByteString n (S bs' o BB)
+      (_,LL) -> rev . B.reverse $ readByteString n (S bs' o LB)
       (_,BB) -> unsafePerformIO $ do
          let len = n+1
          ptr <- mallocBytes len

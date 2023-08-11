@@ -272,7 +272,6 @@ newtype BitGet a = B { runState :: S -> Get (S,a) }
 
 instance Monad BitGet where
   return x = B $ \s -> return (s,x)
-  fail str = B $ \s -> putBackState s >> fail str
   (B f) >>= g = B $ \s -> do (s',a) <- f s
                              runState (g a) s'
 

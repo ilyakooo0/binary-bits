@@ -116,13 +116,13 @@ shiftr_w32 :: Word32 -> Int -> Word32
 shiftr_w64 :: Word64 -> Int -> Word64
 
 #if defined(__GLASGOW_HASKELL__) && !defined(__HADDOCK__)
-shiftl_w8  (W8# w)  (I# i) = W8#  (w `uncheckedShiftL#`   i)
-shiftl_w16 (W16# w) (I# i) = W16# (w `uncheckedShiftL#`   i)
-shiftl_w32 (W32# w) (I# i) = W32# (w `uncheckedShiftL#`   i)
+shiftl_w8   w  i = w `unsafeShiftL`   i
+shiftl_w16 w i = w `unsafeShiftL`   i
+shiftl_w32 w i = w `unsafeShiftL`   i
 
-shiftr_w8  (W8#  w) (I# i) = W8# (w `uncheckedShiftRL#`   i)
-shiftr_w16 (W16# w) (I# i) = W16# (w `uncheckedShiftRL#`  i)
-shiftr_w32 (W32# w) (I# i) = W32# (w `uncheckedShiftRL#`  i)
+shiftr_w8   w i = w `unsafeShiftR`   i
+shiftr_w16 w i = w `unsafeShiftR`  i
+shiftr_w32 w i = w `unsafeShiftR`  i
 
 
 #if WORD_SIZE_IN_BITS < 64

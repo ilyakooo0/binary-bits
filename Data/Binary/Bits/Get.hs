@@ -60,6 +60,7 @@ module Data.Binary.Bits.Get
 
             -- ** Get bytes
             , getBool
+            , getBool#
             , getWord8
             , getWord16
             , getWord32
@@ -114,6 +115,8 @@ import Control.Applicative
 import Control.Monad (when,foldM_)
 
 import Prelude as P
+import GHC.Word
+import GHC.Base (uncheckedShiftLWord8#, wordToWord8#, Int (..), andWord8#, Word8#, (-#), Int#, xorI#, eqWord8#, TYPE)
 
 -- $bitget
 -- Parse bits using a monad.
@@ -181,6 +184,18 @@ readBool (S bs o bo) = case bo of
    BL -> testBit (unsafeHead bs) (7-o)
    LL -> testBit (unsafeHead bs) o
    LB -> testBit (unsafeHead bs) o
+
+-- | Read a single bit
+readBool# :: S -> Int
+readBool# (S bs (I# o) bo) = case bo of
+   BB -> testBit# (7# -# o)
+   BL -> testBit# (7# -# o)
+   LL -> testBit# o
+   LB -> testBit# o
+   where
+      !(W8# w) = unsafeHead bs
+      testBit# n = I# (((w `andWord8#` (wordToWord8# 1## `uncheckedShiftLWord8#` n)) `eqWord8#` wordToWord8# 0##) `xorI#` 1#)
+
 
 -- | Extract a range of bits from (ws :: ByteString)
 --
@@ -363,6 +378,10 @@ isEmpty = B $ \ (S bs o bo) -> if B.null bs
 getBool :: BitGet Bool
 getBool = block bool
 
+-- | Get 1 bit as a 'Bool'.
+getBool# :: BitGet Int
+getBool# = block bool#
+
 -- | Get @n@ bits as a 'Word8'. @n@ must be within @[0..8]@.
 getWord8 :: Int -> BitGet Word8
 getWord8 n = block (word8 n)
@@ -437,6 +456,10 @@ block (Block i p) = do
 -- | Read a 1 bit 'Bool'.
 bool :: Block Bool
 bool = Block 1 readBool
+
+-- | Read a 1 bit 'Bool'.
+bool# :: Block Int
+bool# = Block 1 readBool#
 
 -- | Read @n@ bits as a 'Word8'. @n@ must be within @[0..8]@.
 word8 :: Int -> Block Word8

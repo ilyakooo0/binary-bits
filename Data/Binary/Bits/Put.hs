@@ -1,3 +1,5 @@
+{-# LANGUAGE MagicHash #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Binary.Bits.Put
@@ -20,8 +22,10 @@ module Data.Binary.Bits.Put
           -- * Data types
           -- ** Bool
           , putBool
+          , putBool#
 
           -- ** Words
+          , putWord#
           , putWord8
           , putWord16
           , putWord32
@@ -46,11 +50,11 @@ import Data.Binary.Bits.Alignment
 import Data.ByteString as BS
 import Data.ByteString.Unsafe as BS
 
-import Control.Applicative
 import Control.Monad (when)
 import Data.Bits
-import Data.Monoid
 import Data.Word
+import GHC.Base (Word#, shiftRL#, Int (..), Int#, (-#), (<#), isTrue#, (+#), shiftL#, wordToWord8#, orWord8#)
+import GHC.Word (Word8(..))
 
 data BitPut a = BitPut { run :: (S -> PairS a) }
 
@@ -62,10 +66,17 @@ data S = S !Builder !Word8 !Int !BitOrder
 putBool :: Bool -> BitPut ()
 putBool b = putWord8 1 (if b then 0xff else 0x00)
 
+-- | Put a 1 bit 'Bool'.
+putBool# :: Word# -> BitPut ()
+putBool# b = putWord# 1# b
+
 
 -- | Generic putWord
 putWord :: (Num a, FastBits a, Integral a) => Int -> a -> BitPut ()
 putWord n w = BitPut $ \s -> PairS () (putWordS n w s)
+
+putWord# :: Int# -> Word# -> BitPut ()
+putWord# n w = BitPut $ \s -> PairS () (putWordS# n w s)
 
 putWordS :: (Num a, FastBits a, Integral a) => Int -> a -> S -> S
 putWordS n w s@(S builder b o bo) = s'
@@ -105,6 +116,53 @@ putWordS n w s@(S builder b o bo) = s'
          BL -> x `fastShiftL` (8-o-cn)
          LL -> x `fastShiftL` o
          LB -> x `fastShiftL` o
+
+      flush s2@(S b2 w2 o2 bo2)
+        | o2 == 8   = S (b2 `mappend` B.singleton w2) 0 0 bo2
+        | otherwise = s2
+
+putWordS# :: Int# -> Word# -> S -> S
+putWordS# n w s@(S builder (W8# b) (I# o) bo) = s'
+   where
+      min# :: Int# -> Int# -> Int#
+      min# x y | isTrue# (x <# y) = x
+      min# _ y = y
+  
+      -- number of bits that will be stored in the current byte
+      cn = min# (8# -# o) n
+
+      -- new state
+      s' = case n of
+            0# -> s
+            _ -> putWordS# (n -# cn) w' (flush (S builder (W8# b') (I# (o +# cn)) bo))
+      
+      -- new current byte
+      b' = wordToWord8# (shl (selectBits w)) `orWord8#` b
+
+      -- Word containing the remaining (n-cn) bits to store in its LSB
+      w' = case bo of
+         BB -> w
+         BL -> w `shiftRL#` cn
+         LL -> w `shiftRL#` cn
+         LB -> w
+
+      -- Select bits to store in the current byte.
+      -- Put them in the correct order and return them in the least-significant
+      -- bits of the returned value
+      selectBits :: Word# -> Word#
+      selectBits x =  case bo of
+         BB ->                  mask# cn (x `shiftRL#` (n -# cn))
+         LB -> reverseBits# cn (mask# cn (x `shiftRL#` (n -# cn)))
+         LL ->                  mask# cn x
+         BL -> reverseBits# cn (mask# cn x)
+
+      -- shift left at the correct position
+      shl :: Word# -> Word#
+      shl x = case bo of
+         BB -> x `shiftL#` (8# -# o -# cn)
+         BL -> x `shiftL#` (8# -# o -# cn)
+         LL -> x `shiftL#` o
+         LB -> x `shiftL#` o
 
       flush s2@(S b2 w2 o2 bo2)
         | o2 == 8   = S (b2 `mappend` B.singleton w2) 0 0 bo2

@@ -12,10 +12,13 @@
 
 module Data.Binary.Bits.Internal
    ( make_mask
+   , make_mask#
    , mask
+   , mask#
    , bit_offset
    , byte_offset
    , reverseBits
+   , reverseBits#
    , FastBits(..)
    )
 where
@@ -38,10 +41,17 @@ make_mask n = (1 `shiftL` fromIntegral n) - 1
 {-# SPECIALIZE make_mask :: Int -> Word32 #-}
 {-# SPECIALIZE make_mask :: Int -> Word64 #-}
 
+make_mask# :: Int# -> Word#
+make_mask# n = (1## `shiftL#` n) `minusWord#` 1##
+
 -- | Keep only the n least-significant bits of the given value
 mask :: (Bits a, Num a) => Int -> a -> a
 mask n v = v .&. make_mask n
 {-# INLINE mask #-}
+
+-- | Keep only the n least-significant bits of the given value
+mask# :: Int# -> Word# -> Word#
+mask# n v = v `and#` make_mask# n
 
 -- | Compute bit offset (equivalent to x `mod` 8 but faster)
 bit_offset :: Int -> Int
@@ -64,6 +74,17 @@ reverseBits n value = rec value n 0
       rec 0 0 r = r
       rec 0 i r = r `fastShiftL` i
       rec v i r = rec (v `fastShiftR` 1) (i-1) ((r `fastShiftL` 1) .|. (v .&. 0x1))
+
+reverseBits# :: Int# -> Word# -> Word#
+reverseBits# n value = rec value n 0##
+   where
+      -- rec v i r, where
+      --    v is orginal value shifted
+      --    i is the remaining number of bits
+      --    r is current value
+      rec 0## 0# r = r
+      rec 0## i r = r `shiftL#` i
+      rec v i r = rec (v `shiftRL#` 1#) (i -# 1#) ((r `shiftL#` 1#) `or#` (v `and#` 0x1##))
 
 
 ---------------------------------------------------------------------
